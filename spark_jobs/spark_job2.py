@@ -62,8 +62,21 @@ def process_net_disk_data(spark, config):
     ).filter(col("alert") != "Normal")
 
     team_no = config['team_number']
-    output_file = os.path.join(output_dir, f"team_{team_no}_NET_DISK.csv")
-    results.coalesce(1).write.csv(output_file, header=True, mode="overwrite")
+    final_csv_path = os.path.join(output_dir, f"team_{team_no}_NET_DISK.csv")
+    temp_dir = os.path.join(output_dir, f"tmp_team_{team_no}_NET_DISK")
+    results.coalesce(1).write.csv(temp_dir, header=True, mode="overwrite")
+    # Move the single part file to final CSV and cleanup temp dir
+    part_file = None
+    for name in os.listdir(temp_dir):
+        if name.startswith("part-") and name.endswith(".csv"):
+            part_file = name
+            break
+    if part_file is not None:
+        os.replace(os.path.join(temp_dir, part_file), final_csv_path)
+    # remove remaining files and temp directory
+    for name in os.listdir(temp_dir):
+        os.remove(os.path.join(temp_dir, name))
+    os.rmdir(temp_dir)
 
 if __name__ == "__main__":
     with open('../config/config.yaml', 'r') as f:
