@@ -5,8 +5,8 @@ import os
 from producer.producer import run_producer
 from consumers.consumer1 import run_consumer1
 from consumers.consumer2 import run_consumer2
-from spark-jobs.spark_job1 import process_cpu_mem_data
-from spark-jobs.spark_job2 import process_net_disk_data
+from spark_jobs.spark_job1 import process_cpu_mem_data
+from spark_jobs.spark_job2 import process_net_disk_data
 from pyspark.sql import SparkSession
 
 def main():

@@ -9,7 +9,7 @@ kafka:
     disk: "topic-disk"
 
 producer:
-  producer_ip: "127.0.0.1"
+  producer_ip: "10.144.230.131"
 
 consumers:
   consumer1_ip: "127.0.0.1"
