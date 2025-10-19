@@ -12,7 +12,7 @@ producer:
   producer_ip: "10.144.115.47"
 
 consumers:
-  consumer1_ip: "127.0.0.1"
+  consumer1_ip: "10.144.115.215"
   consumer2_ip: "127.0.0.1"
 
 spark_jobs:

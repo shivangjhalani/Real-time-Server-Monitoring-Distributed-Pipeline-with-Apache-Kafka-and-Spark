@@ -62,7 +62,7 @@ def process_cpu_mem_data(spark, config):
 
     team_no = config['team_number']
     output_file = os.path.join(output_dir, f"team_{team_no}_CPU_MEM.csv")
-    results.write.csv(output_file, header=True, mode="overwrite")
+    results.coalesce(1).write.csv(output_file, header=True, mode="overwrite")
 
 if __name__ == "__main__":
     with open('../config/config.yaml', 'r') as f:
