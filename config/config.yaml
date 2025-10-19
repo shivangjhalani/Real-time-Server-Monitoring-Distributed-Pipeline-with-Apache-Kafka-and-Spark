@@ -1,0 +1,30 @@
+team_number: 1
+
+kafka:
+  broker_ip: "127.0.0.1:9092"
+  topics:
+    cpu: "topic-cpu"
+    mem: "topic-mem"
+    net: "topic-net"
+    disk: "topic-disk"
+
+producer:
+  producer_ip: "127.0.0.1"
+
+consumers:
+  consumer1_ip: "127.0.0.1"
+  consumer2_ip: "127.0.0.1"
+
+spark_jobs:
+  window_duration: "30 seconds"
+  slide_duration: "10 seconds"
+
+alert_thresholds:
+  cpu_pct: 80.0
+  mem_pct: 75.0
+  net_in: 1000.0
+  disk_io: 500.0
+
+paths:
+  data_file: "data/sample_data.csv"
+  output_dir: "output/"
