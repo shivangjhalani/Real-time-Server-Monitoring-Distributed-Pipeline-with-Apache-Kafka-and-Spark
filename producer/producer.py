@@ -67,7 +67,7 @@ def run_producer(config):
         except KafkaError as e:
             print(f"ERROR sending to Kafka: {e}")
             break
-        time.sleep(1)
+        time.sleep(0.1)  # 0.1 seconds = 10x faster. Use 0.01 for 100x, or 0 for max speed
 
     producer.flush()
     producer.close()
