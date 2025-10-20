@@ -10,12 +10,11 @@ from spark_jobs.spark_job2 import process_net_disk_data
 from pyspark.sql import SparkSession
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python main.py [producer|consumer1|consumer2|spark-job1|spark-job2] [--fast]")
+    if len(sys.argv) != 2:
+        print("Usage: python main.py [producer|consumer1|consumer2|spark-job1|spark-job2]")
         sys.exit(1)
 
     role = sys.argv[1]
-    fast_mode = '--fast' in sys.argv
 
     with open('config/config.yaml', 'r') as f:
         config = yaml.safe_load(f)
@@ -24,7 +23,7 @@ def main():
         os.makedirs(config['paths']['output_dir'])
 
     if role == "producer":
-        run_producer(config, fast_mode)
+        run_producer(config)
     elif role == "consumer1":
         run_consumer1(config)
     elif role == "consumer2":
