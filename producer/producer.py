@@ -59,15 +59,15 @@ def run_producer(config):
     for row in read_data(data_file):
         try:
             # Force errors to surface quickly
-            producer.send(cpu_topic, value=f"{row['ts']},{row['server_id']},{row['cpu_pct']}").get(timeout=5)
-            producer.send(mem_topic, value=f"{row['ts']},{row['server_id']},{row['mem_pct']}").get(timeout=5)
-            producer.send(net_topic, value=f"{row['ts']},{row['server_id']},{row['net_in']},{row['net_out']}").get(timeout=5)
-            producer.send(disk_topic, value=f"{row['ts']},{row['server_id']},{row['disk_io']}").get(timeout=5)
+            producer.send(cpu_topic, value=f"{row['ts']},{row['server_id']},{row['cpu_pct']}").get(timeout=30)
+            producer.send(mem_topic, value=f"{row['ts']},{row['server_id']},{row['mem_pct']}").get(timeout=30)
+            producer.send(net_topic, value=f"{row['ts']},{row['server_id']},{row['net_in']},{row['net_out']}").get(timeout=30)
+            producer.send(disk_topic, value=f"{row['ts']},{row['server_id']},{row['disk_io']}").get(timeout=30)
             print(f"Sent data for {row['server_id']} at {row['ts']}")
         except KafkaError as e:
             print(f"ERROR sending to Kafka: {e}")
             break
-        time.sleep(0.02)  # 0.1 seconds = 10x faster. Use 0.01 for 100x, or 0 for max speed
+        time.sleep(0.05)
 
     producer.flush()
     producer.close()
