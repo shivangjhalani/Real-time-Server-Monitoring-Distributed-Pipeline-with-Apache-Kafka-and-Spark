@@ -33,27 +33,6 @@ def run_producer(config):
     net_topic = config['kafka']['topics']['net']
     disk_topic = config['kafka']['topics']['disk']
 
-    # Force metadata fetch for topics to fail fast if broker/topics unreachable
-    for t in [cpu_topic, mem_topic, net_topic, disk_topic]:
-        parts = producer.partitions_for(t)
-        if parts is None:
-            print(f"Waiting for topic metadata: {t} ...")
-            # Give a brief grace period
-            for _ in range(5):
-                time.sleep(1)
-                parts = producer.partitions_for(t)
-                if parts is not None:
-                    break
-        if parts is None:
-            print(f"ERROR: Could not fetch metadata for topic '{t}'.\n"
-                  f"- Verify broker '{broker}' is reachable from this machine.\n"
-                  f"- Ensure advertised.listeners on broker uses the ZeroTier IP.\n"
-                  f"- Ensure topic exists or auto.create.topics.enable=true on broker.")
-            try:
-                producer.close()
-            except Exception:
-                pass
-            return
 
     print(f"Streaming metrics from {data_file} ...")
     for row in read_data(data_file):
