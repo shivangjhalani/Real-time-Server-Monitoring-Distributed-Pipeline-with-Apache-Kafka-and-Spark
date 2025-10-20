@@ -10,7 +10,6 @@ def create_consumer(broker_ip, topics, group_id):
         enable_auto_commit=True,
         group_id=group_id,
         value_deserializer=lambda x: x.decode('utf-8'),
-        consumer_timeout_ms=1000,  # Timeout to detect if no messages
         api_version_auto_timeout_ms=10000,
         request_timeout_ms=30000
     )
