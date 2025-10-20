@@ -67,7 +67,7 @@ def run_producer(config):
         except KafkaError as e:
             print(f"ERROR sending to Kafka: {e}")
             break
-        time.sleep(0.05)
+        time.sleep(0.1)
 
     producer.flush()
     producer.close()
