@@ -20,11 +20,11 @@ spark_jobs:
   slide_duration: "10 seconds"
 
 alert_thresholds:
-  cpu_pct: 94.35
-  mem_pct: 78.06
-  net_in: 4724.68
-  disk_io: 4563.25
+  cpu_pct: 80.0
+  mem_pct: 75.0
+  net_in: 1000.0
+  disk_io: 500.0
 
 paths:
-  data_file: "data/dataset.csv"
+  data_file: "data/sample_data.csv"
   output_dir: "output/"

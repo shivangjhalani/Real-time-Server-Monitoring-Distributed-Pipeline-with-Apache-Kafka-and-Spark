@@ -1,8 +1,8 @@
 import yaml
 import os
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, window, avg, format_number, date_format, when, to_timestamp
-from pyspark.sql.types import StructType, StructField, StringType, FloatType
+from pyspark.sql.functions import col, window, avg, format_number, date_format, when
+from pyspark.sql.types import StructType, StructField, StringType, FloatType, TimestampType
 
 def create_spark_session(app_name):
     return SparkSession.builder.appName(app_name).getOrCreate()
@@ -16,23 +16,19 @@ def process_cpu_mem_data(spark, config):
     mem_file = os.path.join(output_dir, 'mem_data.csv')
 
     cpu_schema = StructType([
-        StructField("ts", StringType(), True),
+        StructField("ts", TimestampType(), True),
         StructField("server_id", StringType(), True),
         StructField("cpu_pct", FloatType(), True)
     ])
 
     mem_schema = StructType([
-        StructField("ts", StringType(), True),
+        StructField("ts", TimestampType(), True),
         StructField("server_id", StringType(), True),
         StructField("mem_pct", FloatType(), True)
     ])
 
-    cpu_df = read_data(spark, cpu_file, cpu_schema) \
-        .withColumn("ts", to_timestamp(col("ts"), "HH:mm:ss")) \
-        .dropna(subset=["ts"])  # ensure valid timestamps
-    mem_df = read_data(spark, mem_file, mem_schema) \
-        .withColumn("ts", to_timestamp(col("ts"), "HH:mm:ss")) \
-        .dropna(subset=["ts"])  # ensure valid timestamps
+    cpu_df = read_data(spark, cpu_file, cpu_schema)
+    mem_df = read_data(spark, mem_file, mem_schema)
 
     window_duration = config['spark_jobs']['window_duration']
     slide_duration = config['spark_jobs']['slide_duration']
