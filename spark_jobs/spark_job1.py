@@ -1,7 +1,7 @@
 import yaml
 import os
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, window, avg, format_number, date_format, when, to_timestamp
+from pyspark.sql.functions import col, window, avg, format_string, date_format, when, to_timestamp
 from pyspark.sql.types import StructType, StructField, StringType, FloatType
 
 def create_spark_session(app_name):
@@ -59,8 +59,8 @@ def process_cpu_mem_data(spark, config):
         col("server_id"),
         date_format(col("window.start"), "HH:mm:ss").alias("window_start"),
         date_format(col("window.end"), "HH:mm:ss").alias("window_end"),
-        format_number(col("avg_cpu"), 2).alias("avg_cpu"),
-        format_number(col("avg_mem"), 2).alias("avg_mem"),
+        format_string("%.2f", col("avg_cpu")).alias("avg_cpu"),
+        format_string("%.2f", col("avg_mem")).alias("avg_mem"),
         col("alert")
     ).filter(col("alert") != "Normal")
 

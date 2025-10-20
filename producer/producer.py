@@ -9,8 +9,8 @@ def create_producer(broker_ip):
     return KafkaProducer(
         bootstrap_servers=broker_ip,
         value_serializer=lambda v: str(v).encode('utf-8'),
-        acks=0,
-        linger_ms=0,
+        acks='all',
+        linger_ms=20,
         request_timeout_ms=10000,
         max_block_ms=10000,
         api_version_auto_timeout_ms=10000,

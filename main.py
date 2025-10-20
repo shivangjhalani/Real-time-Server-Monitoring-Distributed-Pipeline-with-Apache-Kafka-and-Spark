@@ -1,6 +1,7 @@
 import sys
 import yaml
 import os
+from pathlib import Path
 
 from producer.producer import run_producer
 from consumers.consumer1 import run_consumer1
@@ -16,11 +17,17 @@ def main():
 
     role = sys.argv[1]
 
-    with open('config/config.yaml', 'r') as f:
+    repo_root = Path(__file__).resolve().parent
+    config_path = repo_root / 'config' / 'config.yaml'
+    with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
 
-    if not os.path.exists(config['paths']['output_dir']):
-        os.makedirs(config['paths']['output_dir'])
+    output_dir = config['paths']['output_dir']
+    if not os.path.isabs(output_dir):
+        output_dir = str((repo_root / output_dir).resolve())
+        config['paths']['output_dir'] = output_dir
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
     if role == "producer":
         run_producer(config)

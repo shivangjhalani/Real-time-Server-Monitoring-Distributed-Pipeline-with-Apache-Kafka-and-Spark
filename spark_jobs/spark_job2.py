@@ -1,7 +1,7 @@
 import yaml
 import os
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, window, max, format_number, date_format, when, to_timestamp
+from pyspark.sql.functions import col, window, max, format_string, date_format, when, to_timestamp
 from pyspark.sql.types import StructType, StructField, StringType, FloatType
 
 def create_spark_session(app_name):
@@ -60,8 +60,8 @@ def process_net_disk_data(spark, config):
         col("server_id"),
         date_format(col("window.start"), "HH:mm:ss").alias("window_start"),
         date_format(col("window.end"), "HH:mm:ss").alias("window_end"),
-        format_number(col("max_net_in"), 2).alias("max_net_in"),
-        format_number(col("max_disk_io"), 2).alias("max_disk_io"),
+        format_string("%.2f", col("max_net_in")).alias("max_net_in"),
+        format_string("%.2f", col("max_disk_io")).alias("max_disk_io"),
         col("alert")
     ).filter(col("alert") != "Normal")
 

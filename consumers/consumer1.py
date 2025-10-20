@@ -26,7 +26,6 @@ def run_consumer1(config):
     consumer = create_consumer(broker_ip, [cpu_topic, mem_topic], 'consumer1-group')
 
     print(f"Consumer connected. Waiting for messages...")
-    print(f"Partitions assigned: {consumer.assignment()}")
 
     cpu_file_path = os.path.join(output_dir, 'cpu_data.csv')
     mem_file_path = os.path.join(output_dir, 'mem_data.csv')

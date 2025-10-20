@@ -26,7 +26,6 @@ def run_consumer2(config):
     consumer = create_consumer(broker_ip, [net_topic, disk_topic], 'consumer2-group')
 
     print(f"Consumer connected. Waiting for messages...")
-    print(f"Partitions assigned: {consumer.assignment()}")
 
     net_file_path = os.path.join(output_dir, 'net_data.csv')
     disk_file_path = os.path.join(output_dir, 'disk_data.csv')
