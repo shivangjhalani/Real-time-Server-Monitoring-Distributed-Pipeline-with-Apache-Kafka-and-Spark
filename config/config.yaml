@@ -12,19 +12,19 @@ producer:
   producer_ip: "10.144.115.47"
 
 consumers:
-  consumer1_ip: "10.144.115.215"
-  consumer2_ip: "127.0.0.1"
+  consumer1_ip: "10.144.174.14"
+  consumer2_ip: "10.144.115.215"
 
 spark_jobs:
   window_duration: "30 seconds"
   slide_duration: "10 seconds"
 
 alert_thresholds:
-  cpu_pct: 80.0
-  mem_pct: 75.0
-  net_in: 1000.0
-  disk_io: 500.0
+  cpu_pct: 94.35
+  mem_pct: 78.06
+  net_in: 4724.68
+  disk_io: 4563.25
 
 paths:
-  data_file: "data/sample_data.csv"
+  data_file: "data/dataset.csv"
   output_dir: "output/"

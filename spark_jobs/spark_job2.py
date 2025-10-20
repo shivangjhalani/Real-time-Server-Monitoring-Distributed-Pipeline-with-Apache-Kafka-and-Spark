@@ -1,8 +1,8 @@
 import yaml
 import os
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, window, max, format_number, date_format, when
-from pyspark.sql.types import StructType, StructField, StringType, FloatType, TimestampType
+from pyspark.sql.functions import col, window, max, format_number, date_format, when, to_timestamp
+from pyspark.sql.types import StructType, StructField, StringType, FloatType
 
 def create_spark_session(app_name):
     return SparkSession.builder.appName(app_name).getOrCreate()
@@ -16,20 +16,24 @@ def process_net_disk_data(spark, config):
     disk_file = os.path.join(output_dir, 'disk_data.csv')
 
     net_schema = StructType([
-        StructField("ts", TimestampType(), True),
+        StructField("ts", StringType(), True),
         StructField("server_id", StringType(), True),
         StructField("net_in", FloatType(), True),
         StructField("net_out", FloatType(), True)
     ])
 
     disk_schema = StructType([
-        StructField("ts", TimestampType(), True),
+        StructField("ts", StringType(), True),
         StructField("server_id", StringType(), True),
         StructField("disk_io", FloatType(), True)
     ])
 
-    net_df = read_data(spark, net_file, net_schema)
-    disk_df = read_data(spark, disk_file, disk_schema)
+    net_df = read_data(spark, net_file, net_schema) \
+        .withColumn("ts", to_timestamp(col("ts"), "HH:mm:ss")) \
+        .dropna(subset=["ts"])  # ensure valid timestamps
+    disk_df = read_data(spark, disk_file, disk_schema) \
+        .withColumn("ts", to_timestamp(col("ts"), "HH:mm:ss")) \
+        .dropna(subset=["ts"])  # ensure valid timestamps
 
     window_duration = config['spark_jobs']['window_duration']
     slide_duration = config['spark_jobs']['slide_duration']
