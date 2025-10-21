@@ -3,20 +3,13 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, max, window, date_format, lit, current_date, concat, to_timestamp, when, format_number
 from pyspark.sql.types import StructType, StructField, StringType, FloatType
 
-def main():
-    with open("config/config.yaml", "r") as f:
-        config = yaml.safe_load(f)
-
+def process_net_disk_data(spark: SparkSession, config: dict):
     team_number = config["team_number"]
     net_threshold = config["alert_thresholds"]["net_in"]
     disk_threshold = config["alert_thresholds"]["disk_io"]
     window_duration = config["spark_jobs"]["window_duration"]
     slide_duration = config["spark_jobs"]["slide_duration"]
     output_dir = config["paths"]["output_dir"]
-
-    spark = SparkSession.builder \
-        .appName(f"Team{team_number}-Network-Disk-Analysis") \
-        .getOrCreate()
 
     spark.sparkContext.setLogLevel("ERROR")
 
@@ -84,8 +77,3 @@ def main():
     final_df.write.csv(output_path, header=True, mode="overwrite")
 
     print(f"Spark Job 2 finished. Output written to {output_path}")
-
-    spark.stop()
-
-if __name__ == "__main__":
-    main()

@@ -3,20 +3,13 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, avg, window, date_format, lit, current_date, concat, to_timestamp, when, format_number
 from pyspark.sql.types import StructType, StructField, StringType, FloatType
 
-def main():
-    with open("config/config.yaml", "r") as f:
-        config = yaml.safe_load(f)
-
+def process_cpu_mem_data(spark: SparkSession, config: dict):
     team_number = config["team_number"]
     cpu_threshold = config["alert_thresholds"]["cpu_pct"]
     mem_threshold = config["alert_thresholds"]["mem_pct"]
     window_duration = config["spark_jobs"]["window_duration"]
     slide_duration = config["spark_jobs"]["slide_duration"]
     output_dir = config["paths"]["output_dir"]
-
-    spark = SparkSession.builder \
-        .appName(f"Team{team_number}-CPU-Memory-Analysis") \
-        .getOrCreate()
 
     spark.sparkContext.setLogLevel("ERROR")
 
@@ -77,7 +70,13 @@ def main():
 
     print(f"Spark Job 1 finished. Output written to {output_path}")
 
-    spark.stop()
-
 if __name__ == "__main__":
-    main()
+    with open("config/config.yaml", "r") as f:
+        config = yaml.safe_load(f)
+
+    spark = SparkSession.builder \
+        .appName(f"Team{config['team_number']}-CPU-Memory-Analysis") \
+        .getOrCreate()
+
+    process_cpu_mem_data(spark, config)
+    spark.stop()
