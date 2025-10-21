@@ -1,156 +1,83 @@
-"""
-Spark Job 1: CPU and Memory Metrics Analysis
-Performs window-based aggregation on CPU and Memory data with anomaly detection.
-"""
+import yaml
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, avg, window, date_format, lit, current_date, concat, to_timestamp, when, format_number
+from pyspark.sql.types import StructType, StructField, StringType, FloatType
 
-import os
-import glob
-import shutil
-from pyspark.sql.functions import (
-    col, avg, window, date_format,
-    to_timestamp, concat, lit, when, round as spark_round
-)
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType
+def main():
+    with open("config/config.yaml", "r") as f:
+        config = yaml.safe_load(f)
 
+    team_number = config["team_number"]
+    cpu_threshold = config["alert_thresholds"]["cpu_pct"]
+    mem_threshold = config["alert_thresholds"]["mem_pct"]
+    window_duration = config["spark_jobs"]["window_duration"]
+    slide_duration = config["spark_jobs"]["slide_duration"]
+    output_dir = config["paths"]["output_dir"]
 
-def read_csv_data(spark, file_path, schema):
-    """Read CSV data with specified schema."""
-    return spark.read.csv(file_path, header=True, schema=schema)
+    spark = SparkSession.builder \
+        .appName(f"Team{team_number}-CPU-Memory-Analysis") \
+        .getOrCreate()
 
-
-def apply_alert_logic(df, cpu_threshold, mem_threshold):
-    """
-    Apply alerting logic for CPU and Memory metrics.
-
-    Alert Conditions:
-    1. avg(cpu_pct) > threshold AND avg(mem_pct) > threshold -> "High CPU + Memory stress"
-    2. avg(cpu_pct) > threshold AND avg(mem_pct) <= threshold -> "CPU spike suspected"
-    3. avg(mem_pct) > threshold AND avg(cpu_pct) <= threshold -> "Memory saturation suspected"
-    4. Otherwise -> "Normal"
-    """
-    return df.withColumn(
-        "alert",
-        when(
-            (col("avg_cpu_raw") > cpu_threshold) & (col("avg_mem_raw") > mem_threshold),
-            "High CPU + Memory stress"
-        ).when(
-            (col("avg_cpu_raw") > cpu_threshold) & (col("avg_mem_raw") <= mem_threshold),
-            "CPU spike suspected"
-        ).when(
-            (col("avg_mem_raw") > mem_threshold) & (col("avg_cpu_raw") <= cpu_threshold),
-            "Memory saturation suspected"
-        ).otherwise("Normal")
-    )
-
-
-def process_cpu_mem_data(spark, config):
-    """
-    Main function to execute Spark Job 1.
-    Processes CPU and Memory data with window-based aggregation.
-
-    Args:
-        spark: SparkSession instance
-        config: Configuration dictionary loaded from config.yaml
-    """
-    # Set log level
     spark.sparkContext.setLogLevel("ERROR")
 
-    # Load configuration
-    output_dir = config['paths']['output_dir']
-    team_number = config['team_number']
-    cpu_threshold = config['alert_thresholds']['cpu_pct']
-    mem_threshold = config['alert_thresholds']['mem_pct']
-
-    # Define file paths
-    cpu_file = os.path.join(output_dir, 'cpu_data.csv')
-    mem_file = os.path.join(output_dir, 'mem_data.csv')
-    output_file = os.path.join(output_dir, f'team_{team_number}_CPU_MEM.csv')
-
-    # Define schemas
     cpu_schema = StructType([
         StructField("ts", StringType(), True),
         StructField("server_id", StringType(), True),
-        StructField("cpu_pct", DoubleType(), True)
+        StructField("cpu_pct", FloatType(), True)
     ])
 
     mem_schema = StructType([
         StructField("ts", StringType(), True),
         StructField("server_id", StringType(), True),
-        StructField("mem_pct", DoubleType(), True)
+        StructField("mem_pct", FloatType(), True)
     ])
 
-    # Read data
-    cpu_df = read_csv_data(spark, cpu_file, cpu_schema)
-    mem_df = read_csv_data(spark, mem_file, mem_schema)
+    # Assuming consumers write to the output directory
+    cpu_data_path = f"{output_dir}cpu_data.csv"
+    mem_data_path = f"{output_dir}mem_data.csv"
 
-    # Convert timestamp strings (HH:MM:SS) to timestamp type
-    # We need to add a date component for proper timestamp conversion
-    # Using a fixed date as we only care about time-based windows
-    cpu_df = cpu_df.withColumn(
-        "timestamp",
-        to_timestamp(concat(lit("1970-01-01 "), col("ts")), "yyyy-MM-dd HH:mm:ss")
-    )
+    cpu_df = spark.read.csv(cpu_data_path, header=True, schema=cpu_schema)
+    mem_df = spark.read.csv(mem_data_path, header=True, schema=mem_schema)
 
-    mem_df = mem_df.withColumn(
-        "timestamp",
-        to_timestamp(concat(lit("1970-01-01 "), col("ts")), "yyyy-MM-dd HH:mm:ss")
-    )
+    # Add current date to timestamp and convert to timestamp type
+    current_day = date_format(current_date(), "yyyy-MM-dd")
 
-    # Aggregate per metric separately, then join on window bounds
-    window_duration = config['spark_jobs'].get('window_duration', '30 seconds')
-    slide_duration = config['spark_jobs'].get('slide_duration', '10 seconds')
+    cpu_df = cpu_df.withColumn("timestamp", to_timestamp(concat(lit(current_day), lit(" "), col("ts"))))
+    mem_df = mem_df.withColumn("timestamp", to_timestamp(concat(lit(current_day), lit(" "), col("ts"))))
 
-    cpu_windowed = cpu_df.groupBy(
+    df = cpu_df.join(mem_df, ["timestamp", "server_id"])
+
+    windowed_df = df.groupBy(
         window(col("timestamp"), window_duration, slide_duration),
         col("server_id")
     ).agg(
-        avg("cpu_pct").alias("avg_cpu_raw")
-    ).withColumn(
-        "window_start", date_format(col("window.start"), "HH:mm:ss")
-    ).withColumn(
-        "window_end", date_format(col("window.end"), "HH:mm:ss")
-    ).select("server_id", "window_start", "window_end", "avg_cpu_raw")
-
-    mem_windowed = mem_df.groupBy(
-        window(col("timestamp"), window_duration, slide_duration),
-        col("server_id")
-    ).agg(
-        avg("mem_pct").alias("avg_mem_raw")
-    ).withColumn(
-        "window_start", date_format(col("window.start"), "HH:mm:ss")
-    ).withColumn(
-        "window_end", date_format(col("window.end"), "HH:mm:ss")
-    ).select("server_id", "window_start", "window_end", "avg_mem_raw")
-
-    windowed_df = cpu_windowed.join(
-        mem_windowed,
-        on=["server_id", "window_start", "window_end"],
-        how="inner"
+        avg("cpu_pct").alias("avg_cpu"),
+        avg("mem_pct").alias("avg_mem")
     )
 
-    # Round values to 2 decimal places
-    windowed_df = windowed_df.withColumn("avg_cpu", spark_round(col("avg_cpu_raw"), 2))
-    windowed_df = windowed_df.withColumn("avg_mem", spark_round(col("avg_mem_raw"), 2))
+    alert_df = windowed_df.withColumn(
+        "alert",
+        when((col("avg_cpu") > cpu_threshold) & (col("avg_mem") > mem_threshold), "High CPU + Memory stress")
+        .when((col("avg_cpu") > cpu_threshold) & (col("avg_mem") <= mem_threshold), "CPU spike suspected")
+        .when((col("avg_mem") > mem_threshold) & (col("avg_cpu") <= cpu_threshold), "Memory saturation suspected")
+        .otherwise("Normal")
+    )
 
-    # Apply alert logic
-    result_df = apply_alert_logic(windowed_df, cpu_threshold, mem_threshold)
+    final_df = alert_df.select(
+        col("server_id"),
+        date_format(col("window.start"), "HH:mm:ss").alias("window_start"),
+        date_format(col("window.end"), "HH:mm:ss").alias("window_end"),
+        format_number(col("avg_cpu"), 2).alias("avg_cpu"),
+        format_number(col("avg_mem"), 2).alias("avg_mem"),
+        col("alert")
+    ).filter(col("alert") != "Normal")
 
-    # Select final columns in the required order
-    final_df = result_df.select(
-        "server_id",
-        "window_start",
-        "window_end",
-        "avg_cpu",
-        "avg_mem",
-        "alert"
-    ).orderBy("window_start", "server_id")
+    output_path = f"{output_dir}team_{team_number}_CPU_MEM"
+    final_df.write.csv(output_path, header=True, mode="overwrite")
 
-    # Write to CSV
-    final_df.coalesce(1).write.mode("overwrite").option("header", "true").csv(output_file + "_temp")
+    print(f"Spark Job 1 finished. Output written to {output_path}")
 
-    # Rename the output file to remove partition directory
-    csv_file = glob.glob(os.path.join(output_file + "_temp", "part-*.csv"))[0]
-    shutil.move(csv_file, output_file)
-    shutil.rmtree(output_file + "_temp")
+    spark.stop()
 
-
+if __name__ == "__main__":
+    main()

@@ -1,159 +1,91 @@
-"""
-Spark Job 2: Network and Disk Metrics Analysis
-Performs window-based aggregation on Network and Disk data with anomaly detection.
-"""
+import yaml
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, max, window, date_format, lit, current_date, concat, to_timestamp, when, format_number
+from pyspark.sql.types import StructType, StructField, StringType, FloatType
 
-import os
-import glob
-import shutil
-from pyspark.sql.functions import (
-    col, max as spark_max, window, date_format,
-    to_timestamp, concat, lit, when, round as spark_round
-)
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType
+def main():
+    with open("config/config.yaml", "r") as f:
+        config = yaml.safe_load(f)
 
+    team_number = config["team_number"]
+    net_threshold = config["alert_thresholds"]["net_in"]
+    disk_threshold = config["alert_thresholds"]["disk_io"]
+    window_duration = config["spark_jobs"]["window_duration"]
+    slide_duration = config["spark_jobs"]["slide_duration"]
+    output_dir = config["paths"]["output_dir"]
 
-def read_csv_data(spark, file_path, schema):
-    """Read CSV data with specified schema."""
-    return spark.read.csv(file_path, header=True, schema=schema)
+    spark = SparkSession.builder \
+        .appName(f"Team{team_number}-Network-Disk-Analysis") \
+        .getOrCreate()
 
-
-def apply_alert_logic(df, net_threshold, disk_threshold):
-    """
-    Apply alerting logic for Network and Disk metrics.
-
-    Alert Conditions:
-    1. max(net_in) > threshold AND max(disk_io) > threshold -> "Network flood + Disk thrash suspected"
-    2. max(net_in) > threshold AND max(disk_io) <= threshold -> "Possible DDoS"
-    3. max(disk_io) > threshold AND max(net_in) <= threshold -> "Disk thrash suspected"
-    4. Otherwise -> "Normal"
-    """
-    return df.withColumn(
-        "alert",
-        when(
-            (col("max_net_in_raw") > net_threshold) & (col("max_disk_io_raw") > disk_threshold),
-            "Network flood + Disk thrash suspected"
-        ).when(
-            (col("max_net_in_raw") > net_threshold) & (col("max_disk_io_raw") <= disk_threshold),
-            "Possible DDoS"
-        ).when(
-            (col("max_disk_io_raw") > disk_threshold) & (col("max_net_in_raw") <= net_threshold),
-            "Disk thrash suspected"
-        ).otherwise("Normal")
-    )
-
-
-def process_net_disk_data(spark, config):
-    """
-    Main function to execute Spark Job 2.
-    Processes Network and Disk data with window-based aggregation.
-
-    Args:
-        spark: SparkSession instance
-        config: Configuration dictionary loaded from config.yaml
-    """
-    # Set log level
     spark.sparkContext.setLogLevel("ERROR")
 
-    # Load configuration
-    output_dir = config['paths']['output_dir']
-    team_number = config['team_number']
-    net_threshold = config['alert_thresholds']['net_in']
-    disk_threshold = config['alert_thresholds']['disk_io']
-
-    # Define file paths
-    net_file = os.path.join(output_dir, 'net_data.csv')
-    disk_file = os.path.join(output_dir, 'disk_data.csv')
-    output_file = os.path.join(output_dir, f'team_{team_number}_NET_DISK.csv')
-
-    # Define schemas
     net_schema = StructType([
         StructField("ts", StringType(), True),
         StructField("server_id", StringType(), True),
-        StructField("net_in", DoubleType(), True),
-        StructField("net_out", DoubleType(), True)
+        StructField("net_in", FloatType(), True)
     ])
 
     disk_schema = StructType([
         StructField("ts", StringType(), True),
         StructField("server_id", StringType(), True),
-        StructField("disk_io", DoubleType(), True)
+        StructField("disk_io", FloatType(), True)
     ])
 
-    # Read data
-    net_df = read_csv_data(spark, net_file, net_schema)
-    disk_df = read_csv_data(spark, disk_file, disk_schema)
+    # Assuming consumers write to the output directory
+    net_data_path = f"{output_dir}net_data.csv"
+    disk_data_path = f"{output_dir}disk_data.csv"
 
-    # Convert timestamp strings (HH:MM:SS) to timestamp type
-    # We need to add a date component for proper timestamp conversion
-    # Using a fixed date as we only care about time-based windows
-    net_df = net_df.withColumn(
-        "timestamp",
-        to_timestamp(concat(lit("1970-01-01 "), col("ts")), "yyyy-MM-dd HH:mm:ss")
+    # We need to handle potential schema differences if net_out is present
+    # Reading all columns as string first, then selecting and casting
+    raw_net_df = spark.read.csv(net_data_path, header=True)
+    net_df = raw_net_df.select(
+        col("ts"),
+        col("server_id"),
+        col("net_in").cast(FloatType())
     )
 
-    disk_df = disk_df.withColumn(
-        "timestamp",
-        to_timestamp(concat(lit("1970-01-01 "), col("ts")), "yyyy-MM-dd HH:mm:ss")
-    )
+    disk_df = spark.read.csv(disk_data_path, header=True, schema=disk_schema)
 
-    # Aggregate per metric separately, then join on window bounds
-    window_duration = config['spark_jobs'].get('window_duration', '30 seconds')
-    slide_duration = config['spark_jobs'].get('slide_duration', '10 seconds')
+    # Add current date to timestamp and convert to timestamp type
+    current_day = date_format(current_date(), "yyyy-MM-dd")
 
-    net_windowed = net_df.groupBy(
+    net_df = net_df.withColumn("timestamp", to_timestamp(concat(lit(current_day), lit(" "), col("ts"))))
+    disk_df = disk_df.withColumn("timestamp", to_timestamp(concat(lit(current_day), lit(" "), col("ts"))))
+
+    df = net_df.join(disk_df, ["timestamp", "server_id"])
+
+    windowed_df = df.groupBy(
         window(col("timestamp"), window_duration, slide_duration),
         col("server_id")
     ).agg(
-        spark_max("net_in").alias("max_net_in_raw")
-    ).withColumn(
-        "window_start", date_format(col("window.start"), "HH:mm:ss")
-    ).withColumn(
-        "window_end", date_format(col("window.end"), "HH:mm:ss")
-    ).select("server_id", "window_start", "window_end", "max_net_in_raw")
-
-    disk_windowed = disk_df.groupBy(
-        window(col("timestamp"), window_duration, slide_duration),
-        col("server_id")
-    ).agg(
-        spark_max("disk_io").alias("max_disk_io_raw")
-    ).withColumn(
-        "window_start", date_format(col("window.start"), "HH:mm:ss")
-    ).withColumn(
-        "window_end", date_format(col("window.end"), "HH:mm:ss")
-    ).select("server_id", "window_start", "window_end", "max_disk_io_raw")
-
-    windowed_df = net_windowed.join(
-        disk_windowed,
-        on=["server_id", "window_start", "window_end"],
-        how="inner"
+        max("net_in").alias("max_net_in"),
+        max("disk_io").alias("max_disk_io")
     )
 
-    # Do not trim windows; include full Spark window alignment to match evaluation
+    alert_df = windowed_df.withColumn(
+        "alert",
+        when((col("max_net_in") > net_threshold) & (col("max_disk_io") > disk_threshold), "Network flood + Disk thrash suspected")
+        .when((col("max_net_in") > net_threshold) & (col("max_disk_io") <= disk_threshold), "Possible DDoS")
+        .when((col("max_disk_io") > disk_threshold) & (col("max_net_in") <= net_threshold), "Disk thrash suspected")
+        .otherwise("Normal")
+    )
 
-    # Round values to 2 decimal places
-    windowed_df = windowed_df.withColumn("max_net_in", spark_round(col("max_net_in_raw"), 2))
-    windowed_df = windowed_df.withColumn("max_disk_io", spark_round(col("max_disk_io_raw"), 2))
+    final_df = alert_df.select(
+        col("server_id"),
+        date_format(col("window.start"), "HH:mm:ss").alias("window_start"),
+        date_format(col("window.end"), "HH:mm:ss").alias("window_end"),
+        format_number(col("max_net_in"), 2).alias("max_net_in"),
+        format_number(col("max_disk_io"), 2).alias("max_disk_io"),
+        col("alert")
+    ).filter(col("alert") != "Normal")
 
-    # Apply alert logic
-    result_df = apply_alert_logic(windowed_df, net_threshold, disk_threshold)
+    output_path = f"{output_dir}team_{team_number}_NET_DISK"
+    final_df.write.csv(output_path, header=True, mode="overwrite")
 
-    # Select final columns in the required order
-    final_df = result_df.select(
-        "server_id",
-        "window_start",
-        "window_end",
-        "max_net_in",
-        "max_disk_io",
-        "alert"
-    ).orderBy("window_start", "server_id")
+    print(f"Spark Job 2 finished. Output written to {output_path}")
 
-    # Write to CSV
-    final_df.coalesce(1).write.mode("overwrite").option("header", "true").csv(output_file + "_temp")
+    spark.stop()
 
-    # Rename the output file to remove partition directory
-    csv_file = glob.glob(os.path.join(output_file + "_temp", "part-*.csv"))[0]
-    shutil.move(csv_file, output_file)
-    shutil.rmtree(output_file + "_temp")
-
-
+if __name__ == "__main__":
+    main()
