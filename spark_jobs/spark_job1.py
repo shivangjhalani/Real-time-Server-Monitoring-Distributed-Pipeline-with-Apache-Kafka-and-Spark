@@ -3,11 +3,11 @@ from pyspark.sql.functions import col, window, avg, when, date_format, round
 import yaml
 import os
 
-def run_spark_job_1(config):
+def process_cpu_mem_data(spark, config):
     """
     Analyzes CPU and Memory data to generate alerts.
     """
-    spark = SparkSession.builder.appName(f"Team{config['team_number']}SparkJob1").getOrCreate()
+    # Spark session is now passed as an argument
 
     # --- 1. Data Loading and Preparation ---
     output_dir = config['paths']['output_dir']
@@ -57,9 +57,12 @@ def run_spark_job_1(config):
     final_df.coalesce(1).write.csv(os.path.join(output_dir, output_filename), header=True, mode="overwrite")
 
     print(f"Spark Job 1 completed. Output saved to {output_filename}")
-    spark.stop()
+    # spark.stop() should be handled by the caller (main.py)
 
 if __name__ == "__main__":
     with open('../config/config.yaml', 'r') as f:
         config = yaml.safe_load(f)
-    run_spark_job_1(config)
+
+    spark = SparkSession.builder.appName(f"Team{config['team_number']}SparkJob1").getOrCreate()
+    process_cpu_mem_data(spark, config)
+    spark.stop()
