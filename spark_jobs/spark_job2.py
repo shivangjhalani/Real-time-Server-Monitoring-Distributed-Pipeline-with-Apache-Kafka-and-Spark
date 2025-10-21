@@ -7,8 +7,8 @@ import os
 import glob
 import shutil
 from pyspark.sql.functions import (
-    col, max as spark_max, window, date_format,
-    to_timestamp, concat, lit, when, round as spark_round
+    col, max as spark_max, window, date_format, expr,
+    to_timestamp, concat, lit, when, round as spark_round, min as spark_min
 )
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType
 
@@ -52,24 +52,14 @@ def process_net_disk_data(spark, config):
         spark: SparkSession instance
         config: Configuration dictionary loaded from config.yaml
     """
-    print("="*70)
-    print("Starting Spark Job 2: Network and Disk Analysis")
-    print("="*70)
-
     # Set log level
-    spark.sparkContext.setLogLevel("WARN")
+    spark.sparkContext.setLogLevel("ERROR")
 
     # Load configuration
     output_dir = config['paths']['output_dir']
     team_number = config['team_number']
     net_threshold = config['alert_thresholds']['net_in']
     disk_threshold = config['alert_thresholds']['disk_io']
-
-    print(f"\nConfiguration:")
-    print(f"  Team Number: {team_number}")
-    print(f"  Network In Threshold: {net_threshold}")
-    print(f"  Disk I/O Threshold: {disk_threshold}")
-    print(f"  Output Directory: {output_dir}")
 
     # Define file paths
     net_file = os.path.join(output_dir, 'net_data.csv')
@@ -91,12 +81,8 @@ def process_net_disk_data(spark, config):
     ])
 
     # Read data
-    print("\nReading data files...")
     net_df = read_csv_data(spark, net_file, net_schema)
     disk_df = read_csv_data(spark, disk_file, disk_schema)
-
-    print(f"  Network records: {net_df.count()}")
-    print(f"  Disk records: {disk_df.count()}")
 
     # Convert timestamp strings (HH:MM:SS) to timestamp type
     # We need to add a date component for proper timestamp conversion
@@ -112,7 +98,6 @@ def process_net_disk_data(spark, config):
     )
 
     # Join Network and Disk data on timestamp and server_id
-    print("\nJoining Network and Disk data...")
     joined_df = net_df.join(
         disk_df,
         (net_df.timestamp == disk_df.timestamp) & (net_df.server_id == disk_df.server_id),
@@ -125,12 +110,7 @@ def process_net_disk_data(spark, config):
         disk_df.disk_io
     )
 
-    print(f"  Joined records: {joined_df.count()}")
-
     # Apply window-based aggregation (30 seconds window, 10 seconds slide)
-    print("\nApplying window-based aggregation...")
-    print("  Window: 30 seconds, Slide: 10 seconds")
-
     windowed_df = joined_df.groupBy(
         window(col("timestamp"), "30 seconds", "10 seconds"),
         col("server_id")
@@ -138,6 +118,14 @@ def process_net_disk_data(spark, config):
         spark_max("net_in").alias("max_net_in_raw"),
         spark_max("disk_io").alias("max_disk_io_raw")
     )
+
+    # Filter out the first two partial windows per server (min_ts + 20 seconds)
+    bounds_df = joined_df.groupBy(col("server_id")).agg(
+        spark_min(col("timestamp")).alias("min_ts")
+    )
+    windowed_df = windowed_df.join(bounds_df, on="server_id", how="inner").filter(
+        col("window.start") >= col("min_ts")
+    ).drop("min_ts")
 
     # Round values to 2 decimal places
     windowed_df = windowed_df.withColumn("max_net_in", spark_round(col("max_net_in_raw"), 2))
@@ -153,7 +141,6 @@ def process_net_disk_data(spark, config):
     )
 
     # Apply alert logic
-    print("\nApplying alert logic...")
     result_df = apply_alert_logic(windowed_df, net_threshold, disk_threshold)
 
     # Select final columns in the required order
@@ -166,29 +153,12 @@ def process_net_disk_data(spark, config):
         "alert"
     ).orderBy("server_id", "window_start")
 
-    # Show sample results
-    print("\nSample Results:")
-    final_df.show(10, truncate=False)
-
-    # Count alerts by type
-    print("\nAlert Summary:")
-    alert_summary = final_df.groupBy("alert").count().orderBy("count", ascending=False)
-    alert_summary.show(truncate=False)
-
     # Write to CSV
-    print(f"\nWriting results to: {output_file}")
     final_df.coalesce(1).write.mode("overwrite").option("header", "true").csv(output_file + "_temp")
 
     # Rename the output file to remove partition directory
     csv_file = glob.glob(os.path.join(output_file + "_temp", "part-*.csv"))[0]
     shutil.move(csv_file, output_file)
     shutil.rmtree(output_file + "_temp")
-
-    print(f"✅ Results successfully written to: {output_file}")
-    print(f"   Total windowed records: {final_df.count()}")
-
-    print("\n" + "="*70)
-    print("Spark Job 2 Completed Successfully")
-    print("="*70)
 
 
