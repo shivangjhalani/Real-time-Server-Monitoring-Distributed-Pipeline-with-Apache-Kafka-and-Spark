@@ -44,7 +44,8 @@ def process_net_disk_data(spark, config):
     disk_windowed = disk_df.groupBy(window("ts", window_duration, slide_duration), "server_id") \
                            .agg(max("disk_io").alias("max_disk_io"))
 
-    results = net_windowed.join(disk_windowed, ["window", "server_id"])
+    results = net_windowed.join(disk_windowed, ["window", "server_id"], "full_outer") \
+                         .na.fill(0.0, subset=["max_net_in", "max_disk_io"])
 
     net_threshold = config['alert_thresholds']['net_in']
     disk_threshold = config['alert_thresholds']['disk_io']

@@ -43,7 +43,8 @@ def process_cpu_mem_data(spark, config):
     mem_windowed = mem_df.groupBy(window("ts", window_duration, slide_duration), "server_id") \
                          .agg(avg("mem_pct").alias("avg_mem"))
 
-    results = cpu_windowed.join(mem_windowed, ["window", "server_id"])
+    results = cpu_windowed.join(mem_windowed, ["window", "server_id"], "full_outer") \
+                         .na.fill(0.0, subset=["avg_cpu", "avg_mem"])
 
     cpu_threshold = config['alert_thresholds']['cpu_pct']
     mem_threshold = config['alert_thresholds']['mem_pct']
