@@ -3,28 +3,14 @@ Spark Job 1: CPU and Memory Metrics Analysis
 Performs window-based aggregation on CPU and Memory data with anomaly detection.
 """
 
-import yaml
 import os
-from pyspark.sql import SparkSession
+import glob
+import shutil
 from pyspark.sql.functions import (
     col, avg, window, date_format,
     to_timestamp, concat, lit, when, round as spark_round
 )
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType
-
-
-def load_config(config_path='../config/config.yaml'):
-    """Load configuration from YAML file."""
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
-
-
-def create_spark_session():
-    """Create and return a Spark session."""
-    return SparkSession.builder \
-        .appName("ServerMonitoring-Job1-CPU-Memory") \
-        .master("local[*]") \
-        .getOrCreate()
 
 
 def read_csv_data(spark, file_path, schema):
@@ -57,17 +43,20 @@ def apply_alert_logic(df, cpu_threshold, mem_threshold):
     )
 
 
-def run_spark_job1(config):
+def process_cpu_mem_data(spark, config):
     """
     Main function to execute Spark Job 1.
     Processes CPU and Memory data with window-based aggregation.
+
+    Args:
+        spark: SparkSession instance
+        config: Configuration dictionary loaded from config.yaml
     """
     print("="*70)
     print("Starting Spark Job 1: CPU and Memory Analysis")
     print("="*70)
 
-    # Initialize Spark
-    spark = create_spark_session()
+    # Set log level
     spark.sparkContext.setLogLevel("WARN")
 
     # Load configuration
@@ -189,9 +178,6 @@ def run_spark_job1(config):
     final_df.coalesce(1).write.mode("overwrite").option("header", "true").csv(output_file + "_temp")
 
     # Rename the output file to remove partition directory
-    import glob
-    import shutil
-
     csv_file = glob.glob(os.path.join(output_file + "_temp", "part-*.csv"))[0]
     shutil.move(csv_file, output_file)
     shutil.rmtree(output_file + "_temp")
@@ -199,19 +185,8 @@ def run_spark_job1(config):
     print(f"✅ Results successfully written to: {output_file}")
     print(f"   Total windowed records: {final_df.count()}")
 
-    # Stop Spark session
-    spark.stop()
     print("\n" + "="*70)
     print("Spark Job 1 Completed Successfully")
     print("="*70)
-
-
-if __name__ == "__main__":
-    # Load configuration
-    config_path = os.path.join(os.path.dirname(__file__), '../config/config.yaml')
-    config = load_config(config_path)
-
-    # Run the job
-    run_spark_job1(config)
 
 
