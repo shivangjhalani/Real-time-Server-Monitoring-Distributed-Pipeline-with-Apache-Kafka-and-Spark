@@ -7,8 +7,8 @@ import os
 import glob
 import shutil
 from pyspark.sql.functions import (
-    col, avg, window, date_format, expr,
-    to_timestamp, concat, lit, when, round as spark_round, min as spark_min
+    col, avg, window, date_format,
+    to_timestamp, concat, lit, when, round as spark_round
 )
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType
 
@@ -31,13 +31,13 @@ def apply_alert_logic(df, cpu_threshold, mem_threshold):
     return df.withColumn(
         "alert",
         when(
-            (col("avg_cpu") > cpu_threshold) & (col("avg_mem") > mem_threshold),
+            (col("avg_cpu_raw") > cpu_threshold) & (col("avg_mem_raw") > mem_threshold),
             "High CPU + Memory stress"
         ).when(
-            (col("avg_cpu") > cpu_threshold) & (col("avg_mem") <= mem_threshold),
+            (col("avg_cpu_raw") > cpu_threshold) & (col("avg_mem_raw") <= mem_threshold),
             "CPU spike suspected"
         ).when(
-            (col("avg_mem") > mem_threshold) & (col("avg_cpu") <= cpu_threshold),
+            (col("avg_mem_raw") > mem_threshold) & (col("avg_cpu_raw") <= cpu_threshold),
             "Memory saturation suspected"
         ).otherwise("Normal")
     )
@@ -96,34 +96,37 @@ def process_cpu_mem_data(spark, config):
         to_timestamp(concat(lit("1970-01-01 "), col("ts")), "yyyy-MM-dd HH:mm:ss")
     )
 
-    # Join CPU and Memory data on timestamp and server_id
-    joined_df = cpu_df.join(
-        mem_df,
-        (cpu_df.timestamp == mem_df.timestamp) & (cpu_df.server_id == mem_df.server_id),
-        "inner"
-    ).select(
-        cpu_df.timestamp,
-        cpu_df.server_id,
-        cpu_df.cpu_pct,
-        mem_df.mem_pct
-    )
+    # Aggregate per metric separately, then join on window bounds
+    window_duration = config['spark_jobs'].get('window_duration', '30 seconds')
+    slide_duration = config['spark_jobs'].get('slide_duration', '10 seconds')
 
-    # Apply window-based aggregation (30 seconds window, 10 seconds slide)
-    windowed_df = joined_df.groupBy(
-        window(col("timestamp"), "30 seconds", "10 seconds"),
+    cpu_windowed = cpu_df.groupBy(
+        window(col("timestamp"), window_duration, slide_duration),
         col("server_id")
     ).agg(
-        avg("cpu_pct").alias("avg_cpu_raw"),
-        avg("mem_pct").alias("avg_mem_raw")
-    )
+        avg("cpu_pct").alias("avg_cpu_raw")
+    ).withColumn(
+        "window_start", date_format(col("window.start"), "HH:mm:ss")
+    ).withColumn(
+        "window_end", date_format(col("window.end"), "HH:mm:ss")
+    ).select("server_id", "window_start", "window_end", "avg_cpu_raw")
 
-    # Filter out the first two partial windows per server (min_ts + 20 seconds)
-    bounds_df = joined_df.groupBy(col("server_id")).agg(
-        spark_min(col("timestamp")).alias("min_ts")
+    mem_windowed = mem_df.groupBy(
+        window(col("timestamp"), window_duration, slide_duration),
+        col("server_id")
+    ).agg(
+        avg("mem_pct").alias("avg_mem_raw")
+    ).withColumn(
+        "window_start", date_format(col("window.start"), "HH:mm:ss")
+    ).withColumn(
+        "window_end", date_format(col("window.end"), "HH:mm:ss")
+    ).select("server_id", "window_start", "window_end", "avg_mem_raw")
+
+    windowed_df = cpu_windowed.join(
+        mem_windowed,
+        on=["server_id", "window_start", "window_end"],
+        how="inner"
     )
-    windowed_df = windowed_df.join(bounds_df, on="server_id", how="inner").filter(
-        col("window.start") >= col("min_ts")
-    ).drop("min_ts")
 
     # Round values to 2 decimal places
     windowed_df = windowed_df.withColumn("avg_cpu", spark_round(col("avg_cpu_raw"), 2))
@@ -149,7 +152,7 @@ def process_cpu_mem_data(spark, config):
         "avg_cpu",
         "avg_mem",
         "alert"
-    ).orderBy("server_id", "window_start")
+    ).orderBy("window_start", "server_id")
 
     # Write to CSV
     final_df.coalesce(1).write.mode("overwrite").option("header", "true").csv(output_file + "_temp")

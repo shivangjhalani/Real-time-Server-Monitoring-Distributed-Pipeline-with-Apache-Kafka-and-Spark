@@ -7,8 +7,8 @@ import os
 import glob
 import shutil
 from pyspark.sql.functions import (
-    col, max as spark_max, window, date_format, expr,
-    to_timestamp, concat, lit, when, round as spark_round, min as spark_min
+    col, max as spark_max, window, date_format,
+    to_timestamp, concat, lit, when, round as spark_round
 )
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType
 
@@ -31,13 +31,13 @@ def apply_alert_logic(df, net_threshold, disk_threshold):
     return df.withColumn(
         "alert",
         when(
-            (col("max_net_in") > net_threshold) & (col("max_disk_io") > disk_threshold),
+            (col("max_net_in_raw") > net_threshold) & (col("max_disk_io_raw") > disk_threshold),
             "Network flood + Disk thrash suspected"
         ).when(
-            (col("max_net_in") > net_threshold) & (col("max_disk_io") <= disk_threshold),
+            (col("max_net_in_raw") > net_threshold) & (col("max_disk_io_raw") <= disk_threshold),
             "Possible DDoS"
         ).when(
-            (col("max_disk_io") > disk_threshold) & (col("max_net_in") <= net_threshold),
+            (col("max_disk_io_raw") > disk_threshold) & (col("max_net_in_raw") <= net_threshold),
             "Disk thrash suspected"
         ).otherwise("Normal")
     )
@@ -97,35 +97,39 @@ def process_net_disk_data(spark, config):
         to_timestamp(concat(lit("1970-01-01 "), col("ts")), "yyyy-MM-dd HH:mm:ss")
     )
 
-    # Join Network and Disk data on timestamp and server_id
-    joined_df = net_df.join(
-        disk_df,
-        (net_df.timestamp == disk_df.timestamp) & (net_df.server_id == disk_df.server_id),
-        "inner"
-    ).select(
-        net_df.timestamp,
-        net_df.server_id,
-        net_df.net_in,
-        net_df.net_out,
-        disk_df.disk_io
-    )
+    # Aggregate per metric separately, then join on window bounds
+    window_duration = config['spark_jobs'].get('window_duration', '30 seconds')
+    slide_duration = config['spark_jobs'].get('slide_duration', '10 seconds')
 
-    # Apply window-based aggregation (30 seconds window, 10 seconds slide)
-    windowed_df = joined_df.groupBy(
-        window(col("timestamp"), "30 seconds", "10 seconds"),
+    net_windowed = net_df.groupBy(
+        window(col("timestamp"), window_duration, slide_duration),
         col("server_id")
     ).agg(
-        spark_max("net_in").alias("max_net_in_raw"),
+        spark_max("net_in").alias("max_net_in_raw")
+    ).withColumn(
+        "window_start", date_format(col("window.start"), "HH:mm:ss")
+    ).withColumn(
+        "window_end", date_format(col("window.end"), "HH:mm:ss")
+    ).select("server_id", "window_start", "window_end", "max_net_in_raw")
+
+    disk_windowed = disk_df.groupBy(
+        window(col("timestamp"), window_duration, slide_duration),
+        col("server_id")
+    ).agg(
         spark_max("disk_io").alias("max_disk_io_raw")
+    ).withColumn(
+        "window_start", date_format(col("window.start"), "HH:mm:ss")
+    ).withColumn(
+        "window_end", date_format(col("window.end"), "HH:mm:ss")
+    ).select("server_id", "window_start", "window_end", "max_disk_io_raw")
+
+    windowed_df = net_windowed.join(
+        disk_windowed,
+        on=["server_id", "window_start", "window_end"],
+        how="inner"
     )
 
-    # Filter out the first two partial windows per server (min_ts + 20 seconds)
-    bounds_df = joined_df.groupBy(col("server_id")).agg(
-        spark_min(col("timestamp")).alias("min_ts")
-    )
-    windowed_df = windowed_df.join(bounds_df, on="server_id", how="inner").filter(
-        col("window.start") >= col("min_ts")
-    ).drop("min_ts")
+    # Do not trim windows; include full Spark window alignment to match evaluation
 
     # Round values to 2 decimal places
     windowed_df = windowed_df.withColumn("max_net_in", spark_round(col("max_net_in_raw"), 2))
@@ -151,7 +155,7 @@ def process_net_disk_data(spark, config):
         "max_net_in",
         "max_disk_io",
         "alert"
-    ).orderBy("server_id", "window_start")
+    ).orderBy("window_start", "server_id")
 
     # Write to CSV
     final_df.coalesce(1).write.mode("overwrite").option("header", "true").csv(output_file + "_temp")
