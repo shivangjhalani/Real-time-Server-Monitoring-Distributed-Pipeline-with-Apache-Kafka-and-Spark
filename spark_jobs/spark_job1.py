@@ -132,15 +132,6 @@ def process_cpu_mem_data(spark, config):
     windowed_df = windowed_df.withColumn("avg_cpu", spark_round(col("avg_cpu_raw"), 2))
     windowed_df = windowed_df.withColumn("avg_mem", spark_round(col("avg_mem_raw"), 2))
 
-    # Extract window start and end times
-    windowed_df = windowed_df.withColumn(
-        "window_start",
-        date_format(col("window.start"), "HH:mm:ss")
-    ).withColumn(
-        "window_end",
-        date_format(col("window.end"), "HH:mm:ss")
-    )
-
     # Apply alert logic
     result_df = apply_alert_logic(windowed_df, cpu_threshold, mem_threshold)
 

@@ -135,15 +135,6 @@ def process_net_disk_data(spark, config):
     windowed_df = windowed_df.withColumn("max_net_in", spark_round(col("max_net_in_raw"), 2))
     windowed_df = windowed_df.withColumn("max_disk_io", spark_round(col("max_disk_io_raw"), 2))
 
-    # Extract window start and end times
-    windowed_df = windowed_df.withColumn(
-        "window_start",
-        date_format(col("window.start"), "HH:mm:ss")
-    ).withColumn(
-        "window_end",
-        date_format(col("window.end"), "HH:mm:ss")
-    )
-
     # Apply alert logic
     result_df = apply_alert_logic(windowed_df, net_threshold, disk_threshold)
 
